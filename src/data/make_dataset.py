@@ -4,6 +4,23 @@ import logging
 from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 
+def create_mapping_code_one_hot(manoeuvers_code_file, mca_code_files):
+    """
+
+    :param manoeuvers_code_file:
+    :param mca_code_files:
+    :return: a function that takes code string as input and gives a 1D array as output (one hot encoding of the code)
+    """
+    pass
+
+def encode_data(data_file, mapping_code_one_hot):
+    """
+
+    :param data_file:
+    :param mapping_code_one_hot:
+    :return: a ND array of the encoded data read from file (X) and 1D array of Y
+    """
+    pass
 
 @click.command()
 @click.argument('input_filepath', type=click.Path(exists=True))
