@@ -6,9 +6,11 @@ from dotenv import find_dotenv, load_dotenv
 import os
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 def make_dictionnary_MCA(df_mca):
     df_mca["Unnamed: 6"].fillna("D", inplace=True)
+    df_mca["Unnamed: 5"] = df_mca["Unnamed: 5"].replace(["8"], "L")
     dim = 4
     vec = np.zeros((len(df_mca), dim))
 
@@ -24,11 +26,10 @@ def make_dictionnary_MCA(df_mca):
     values_altitude = df_mca.apply(lambda row: "".join(row["Altitude"].strip("ft").split()[-2:]) if row["Altitude"] != "Zp max" else 15000, axis=1)
     vec[:, 3] = values_altitude
 
-    dict_mca = dict((df_mca.iloc[idx]["Code MCA"] + df_mca.iloc[idx]["Unnamed: 5"] + df_mca.iloc[idx]["Unnamed: 6"], vec[idx]) for idx in range(len(df_mca)))
-    return dict_mca
+    return (df_mca["Code MCA"] + df_mca["Unnamed: 5"] + df_mca["Unnamed: 6"]).values, vec
 
 
-def make_dictionnary_family_L(df_manoeuvers):
+def make_map_family_L(df_manoeuvers):
     dim = 13
     vec = np.zeros((len(df_manoeuvers), dim))
     # first letter L
@@ -68,8 +69,15 @@ def make_dictionnary_family_L(df_manoeuvers):
     bool_idx_B = df_manoeuvers['letter_5'] == "B"
     vec[bool_idx_B, 12] = 1
 
-    dict_manoeuvers = dict((code, vec[idx]) for idx, code in enumerate(df_manoeuvers["code"]))
-    return dict_manoeuvers
+    return df_manoeuvers["code"].values, vec
+
+
+def make_map_family_dummy(df_manoeuvers):
+
+    nb = 30
+    dim = 25
+    return np.array([str(elm)[:4] for elm in np.random.rand(nb)]), np.ones((nb, dim))
+
 
 
 def create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=None):
@@ -80,8 +88,10 @@ def create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=No
     :return: a function that takes code string as input and gives a 1D array as output (one hot encoding of the code)
     """
 
+    # for each family: a function that returns a dict: code -> vector
     dct_family_dict_maker = {
-        "L": make_dictionnary_family_L
+        "L": make_map_family_L,
+        "DUMMY": make_map_family_dummy
     }
 
     names_manoeuvers = ["code",
@@ -103,33 +113,65 @@ def create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=No
 
     dict_flight_configuration_parameters = {}
 
+    total_nb_manoeuvers = 0
+    dim_total_encoding = 0
+
     for family in families:
         bool_index_family = df_manoeuvers["code"].str.startswith(family, na=False)
         df_family = df_manoeuvers[bool_index_family]
-        dict_flight_configuration_parameters.update(dct_family_dict_maker[family](df_family))
+        codes_family, encodings_family = dct_family_dict_maker[family](df_family)
+        dict_flight_configuration_parameters[family] = (codes_family, encodings_family)
+        total_nb_manoeuvers += codes_family.shape[0]
+        dim_total_encoding += encodings_family.shape[1]
 
     df_mca = pd.read_csv(open(mca_code_file, 'r', errors="ignore"), delimiter=";")
     df_mca = df_mca.dropna(how="all", axis=0)
     df_mca = df_mca.dropna(how="all", axis=1)
 
-    dict_mca = make_dictionnary_MCA(df_mca)
+    codes_mca, encodings_mca = make_dictionnary_MCA(df_mca)
+    nb_mca, dim_mca = encodings_mca.shape
+    # total_nb_manoeuvers *= codes_mca.shape[0]
+    # dim_total_encoding += encodings_mca.shape[1]
 
-    dict_final_mapping = {}
-    for key_fcp in dict_flight_configuration_parameters:
-        for key_mca in dict_mca:
-            dict_final_mapping[key_fcp + key_mca] = np.concatenate((dict_flight_configuration_parameters[key_fcp], dict_mca[key_mca]))
+    families_codes = np.empty((total_nb_manoeuvers,), dtype="object")
+    families_encodings = np.zeros((total_nb_manoeuvers, dim_total_encoding))
+    i_pos, j_pos = 0, 0
+    for family in sorted(families):
+        codes_family, encodings_family = dict_flight_configuration_parameters[family]
+        nb_encodings_to_add = encodings_family.shape[0]
+        nb_dim_encoding_to_add = encodings_family.shape[1]
+        i_pos_next, j_pos_next = i_pos+nb_encodings_to_add, j_pos+nb_dim_encoding_to_add
+        families_encodings[i_pos:i_pos_next, j_pos:j_pos_next] = encodings_family
+        families_codes[i_pos:i_pos_next] = codes_family
+        i_pos, j_pos = i_pos_next, j_pos_next
 
-    return dict_final_mapping.get
+    repeated_families_encodings = np.tile(families_encodings.T, nb_mca).T
+    repeated_mca = np.tile(encodings_mca.T, families_encodings.shape[0]).T
+
+    repeated_family_codes = np.tile(families_codes.T, nb_mca).T
+    repeated_mca_codes = np.tile(codes_mca.T, families_codes.shape[0]).T
+
+    final_encodings = np.hstack([repeated_families_encodings, repeated_mca])
+    final_codes = repeated_family_codes + repeated_mca_codes
+    dict_final_mapping = dict((code, final_encodings[idx]) for idx, code in enumerate(final_codes))
+    return dict_final_mapping
+    # return dict_final_mapping.get
 
 
-def encode_data(data_file, mapping_code_one_hot):
+def encode_data(data_file, mapping_code_one_hot, families=None):
     """
 
     :param data_file:
     :param mapping_code_one_hot:
     :return: a ND array of the encoded data read from file (X) and 1D array of Y
     """
-    pass
+    df_data = pd.read_csv(data_file, delimiter=";", header=None)
+    if families is None:
+        families = tuple(np.unique(df_data[0].apply(lambda row: row[0][0])))
+
+    for family in families:
+        df_data_family = df_data[df_data[0].str.startswith(family)]
+    df_data_family.apply(lambda row: mapping_code_one_hot(row[0]))
 
 @click.command()
 @click.argument('input_filepath', type=click.Path(exists=True))
@@ -154,7 +196,10 @@ if __name__ == '__main__':
     load_dotenv(find_dotenv())
     manoeuvers_code_file = Path(os.environ["project_dir"]) / "data/raw/manoeuver_code.csv"
     mca_code_file = Path(os.environ["project_dir"]) / "data/raw/MCA_code.csv"
+    data_main_rotor = Path(os.environ["project_dir"]) / "data/raw/Data_Main_rotor.csv"
 
-    # main()
-    mapping_code_one_hot = create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=("L",))
+    families = ("L")
+
+    mapping_code_one_hot = create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=families)
+    encode_data(data_main_rotor, mapping_code_one_hot, families=families)
     print(mapping_code_one_hot("LLAXXGIB"))
