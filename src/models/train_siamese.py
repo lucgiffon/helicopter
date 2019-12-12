@@ -1,7 +1,11 @@
+import time
+
 from dotenv import load_dotenv, find_dotenv
 import os
 import numpy as np
 from pathlib import Path
+
+import tensorflow as tf
 
 from keras import Input, Model
 from keras.callbacks import TensorBoard
@@ -10,6 +14,7 @@ from keras.optimizers import RMSprop, Adam
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import normalize
 import keras.backend as K
+
 
 def create_pairs(x, y):
     '''Positive and negative pair creation.
@@ -27,7 +32,7 @@ def create_pairs(x, y):
 def euclidean_distance(vects):
     x, y = vects
     sum_square = K.sum(K.square(x - y), axis=1, keepdims=True)
-    return K.sqrt(K.maximum(sum_square, K.epsilon()))
+    return tf.sqrt(K.maximum(sum_square, K.epsilon()))
 
 
 def eucl_dist_output_shape(shapes):
@@ -58,10 +63,13 @@ if __name__ == "__main__":
     data = np.load(input_data_file)
     X, y = data["X"], data["y"]
     input_shape = X.shape[1:]
-    epochs = 10
+    epochs = 5
     X = normalize(X, axis=0, norm="max")
-    y = normalize(y[:, np.newaxis], axis=0, norm="l2")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    max_y_train = np.max(y_train)
+    y_train /= max_y_train
+    y_test /= max_y_train
+
     train_pairs, train_y = create_pairs(X_train, y_train)
     test_pairs, test_y = create_pairs(X_test, y_test)
 
@@ -83,8 +91,8 @@ if __name__ == "__main__":
     model = Model([input_a, input_b], distance)
 
 
-    tb_cb = TensorBoard(log_dir='./logs',
-                histogram_freq=0, batch_size=32, write_graph=True, write_grads=True , write_images=False, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None, update_freq='epoch')
+    tb_cb = TensorBoard(log_dir='./logs_siamese/{}'.format(time.time()),
+                        histogram_freq=0, batch_size=32, write_graph=True, write_grads=True, write_images=False, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None, update_freq='epoch')
 
     # train
     rms = Adam(1e-1)
@@ -95,3 +103,10 @@ if __name__ == "__main__":
           validation_data=([test_pairs[:, 0], test_pairs[:, 1]], test_y),
           callbacks=[tb_cb])
 
+    transformation_model = Model(input=[input_a], output=[processed_a])
+    transformation_model.compile(loss="mse", optimizer=rms)
+
+    transformed_data = transformation_model.predict(X)
+
+    output_data_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor_embeded.npz"
+    np.savez(output_data_file, **{"X": transformed_data, "y": y})
