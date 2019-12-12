@@ -48,30 +48,11 @@ def create_base_network(input_shape):
     # x = Dropout(0.1)(x)
     return Model(input, x)
 
-def contrastive_loss(y_true, y_pred):
-    '''Contrastive loss from Hadsell-et-al.'06
-    http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
-    '''
-    margin = 1
-    square_pred = K.square(y_pred)
-    margin_square = K.square(K.maximum(margin - y_pred, 0))
-    return K.mean(y_true * square_pred + (1 - y_true) * margin_square)
-
-if __name__ == "__main__":
-    load_dotenv(find_dotenv())
-    input_data_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor.npz"
-    data = np.load(input_data_file)
-    X, y = data["X"], data["y"]
+def create_siamese_embedder(X, y, X_val, y_val, batch_size=128, nb_epochs=10):
     input_shape = X.shape[1:]
-    epochs = 5
-    X = normalize(X, axis=0, norm="max")
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    max_y_train = np.max(y_train)
-    y_train /= max_y_train
-    y_test /= max_y_train
 
-    train_pairs, train_y = create_pairs(X_train, y_train)
-    test_pairs, test_y = create_pairs(X_test, y_test)
+    train_pairs, train_y = create_pairs(X, y)
+    test_pairs, test_y = create_pairs(X_val, y_val)
 
     base_network = create_base_network(input_shape)
 
@@ -87,26 +68,46 @@ if __name__ == "__main__":
     distance = Lambda(euclidean_distance,
                       output_shape=eucl_dist_output_shape)([processed_a, processed_b])
 
-
-    model = Model([input_a, input_b], distance)
-
+    siamese_model = Model([input_a, input_b], distance)
 
     tb_cb = TensorBoard(log_dir='./logs_siamese/{}'.format(time.time()),
-                        histogram_freq=0, batch_size=32, write_graph=True, write_grads=True, write_images=False, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None, update_freq='epoch')
+                        histogram_freq=0, batch_size=32, write_graph=True, write_grads=True, write_images=False, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None,
+                        embeddings_data=None, update_freq='epoch')
 
     # train
-    rms = Adam(1e-1)
-    model.compile(loss="mse", optimizer=rms)
-    model.fit([train_pairs[:, 0], train_pairs[:, 1]], train_y,
-          batch_size=128,
-          epochs=epochs,
-          validation_data=([test_pairs[:, 0], test_pairs[:, 1]], test_y),
-          callbacks=[tb_cb])
+    adam = Adam(1e-1)
+    siamese_model.compile(loss="mse", optimizer=adam)
+    siamese_model.fit([train_pairs[:, 0], train_pairs[:, 1]], train_y,
+              batch_size=batch_size,
+              epochs=nb_epochs,
+              validation_data=([test_pairs[:, 0], test_pairs[:, 1]], test_y),
+              callbacks=[tb_cb])
+
 
     transformation_model = Model(input=[input_a], output=[processed_a])
-    transformation_model.compile(loss="mse", optimizer=rms)
+    transformation_model.compile(optimizer=adam)
+    return transformation_model
 
+def main():
+    load_dotenv(find_dotenv())
+    input_data_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor.npz"
+    data = np.load(input_data_file)
+    X, y = data["X"], data["y"]
+    batch_size=128
+    nb_epochs = 5
+
+    X = normalize(X, axis=0, norm="max")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    max_y_train = np.max(y_train)
+    y_train /= max_y_train
+    y_test /= max_y_train
+
+    transformation_model = create_siamese_embedder(X_train, y_train, X_test, y_test, batch_size=batch_size, nb_epochs=nb_epochs)
     transformed_data = transformation_model.predict(X)
 
     output_data_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor_embeded.npz"
     np.savez(output_data_file, **{"X": transformed_data, "y": y})
+
+
+if __name__ == "__main__":
+    pass
