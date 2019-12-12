@@ -173,9 +173,7 @@ def encode_data(data_file, mapping_code_one_hot, families=None):
         df_data_family = df_data[df_data[0].str.startswith(family)]
     df_data_family.apply(lambda row: mapping_code_one_hot(row[0]))
 
-def get_pcm_data(pcm_data_file):
-
-    names = ["identifier",
+names_pcm = ["identifier",
     "NUM",
     "ZP",
     "OAT",
@@ -236,9 +234,11 @@ def get_pcm_data(pcm_data_file):
     "time start",
     "time end",
     "code",
-    "description"]
+"description"]
 
-    df_data = pd.read_csv(pcm_data_file, delimiter=",", header=None, names=names)
+
+def get_pcm_data(pcm_data_file, return_pandas=False):
+    df_data = pd.read_csv(pcm_data_file, delimiter=",", header=None, names=names_pcm)
     df_data = df_data[3:].reset_index(drop=True)
     del df_data['identifier']
     del df_data["NUM"]
@@ -247,22 +247,38 @@ def get_pcm_data(pcm_data_file):
     del df_data["time end"]
     del df_data["description"]
 
-    encoding_manoeuvers = df_data.values[:, :-1].astype(np.float)
-    codes_manoeuvers = df_data.values[:, -1]
+
+    if return_pandas:
+        encoding_manoeuvers = df_data.loc[:, df_data.columns != "code"].astype(np.float)
+        codes_manoeuvers = df_data.loc[:, df_data.columns == "code"]
+    else:
+        encoding_manoeuvers = df_data.values[:, :-1].astype(np.float)
+        codes_manoeuvers = df_data.values[:, -1]
 
     return codes_manoeuvers, encoding_manoeuvers
 
-def get_X_y_data_pcm(pcm_data_file, loads_data_file, return_codes=False):
-    codes, pcm_data = get_pcm_data(pcm_data_file)
+def get_X_y_data_pcm(pcm_data_file, loads_data_file, return_codes=False, return_pandas=False):
+    codes, pcm_data = get_pcm_data(pcm_data_file, return_pandas=return_pandas)
     df_data = pd.read_csv(loads_data_file, delimiter=";", header=None)
 
     # there is a data point in the pcm data that is absent from the load data
     # this loops find it and remove it
+
     while True:
-        for idx_code, code in enumerate(codes):
+        if not return_pandas:
+            generator = enumerate(codes)
+        else:
+            generator = enumerate(np.squeeze(codes.values))
+        for idx_code, code in generator:
             if code != df_data.iloc[idx_code][0]:
-                codes = np.delete(codes, idx_code)
-                pcm_data = np.delete(pcm_data, idx_code, axis=0)
+                if return_pandas:
+                    codes = codes.drop(idx_code)
+                    pcm_data = pcm_data.drop(idx_code)
+                    codes.reset_index(drop=True, inplace=True)
+                    pcm_data.reset_index(drop=True, inplace=True)
+                else:
+                    codes = np.delete(codes, idx_code)
+                    pcm_data = np.delete(pcm_data, idx_code, axis=0)
                 print("Mismatch manoeuver: {} {} {}".format(idx_code, code, df_data.iloc[idx_code][0]))
                 break
         else:
@@ -272,11 +288,21 @@ def get_X_y_data_pcm(pcm_data_file, loads_data_file, return_codes=False):
     load_data = df_data.values[:, 1]
 
     # remove lines from pcm data with infinite values in some columns
-    indexes_infty = np.argwhere(np.isinf(pcm_data))
-    line_infty = np.unique(indexes_infty[:, 0])
-    pcm_data = np.delete(pcm_data, line_infty, axis=0)
-    codes = np.delete(codes, line_infty, axis=0)
-    load_data = np.delete(load_data, line_infty, axis=0).astype(np.float)
+    if return_pandas:
+        indexes_infty = np.argwhere(np.isinf(pcm_data.values))
+        line_infty = np.unique(indexes_infty[:, 0])
+        codes = codes.drop(line_infty)
+        pcm_data = pcm_data.drop(line_infty)
+        codes.reset_index(drop=True, inplace=True)
+        pcm_data.reset_index(drop=True, inplace=True)
+        load_data = np.delete(load_data, line_infty, axis=0).astype(np.float)
+        load_data = pd.DataFrame(load_data, columns=["load"])
+    else:
+        indexes_infty = np.argwhere(np.isinf(pcm_data))
+        line_infty = np.unique(indexes_infty[:, 0])
+        pcm_data = np.delete(pcm_data, line_infty, axis=0)
+        codes = np.delete(codes, line_infty, axis=0)
+        load_data = np.delete(load_data, line_infty, axis=0).astype(np.float)
 
     if return_codes:
         return codes, pcm_data, load_data
@@ -314,9 +340,12 @@ if __name__ == '__main__':
 
     # mapping_code_one_hot = create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=families)
     # encode_data(data_main_rotor, mapping_code_one_hot, families=families)
-    x_y_pcm_data_output_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor.npz"
-    X, y = get_X_y_data_pcm(pcm_data_file, data_main_rotor)
-    np.savez(x_y_pcm_data_output_file, **{"X": X, "y": y})
+    x_y_pcm_data_output_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor.csv"
+    # x_y_pcm_data_output_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor.npz"
+    X, y = get_X_y_data_pcm(pcm_data_file, data_main_rotor, return_pandas=True)
+    xy_df = pd.concat([X.reindex(), y], axis=1, ignore_index=True)
+    xy_df.to_csv(x_y_pcm_data_output_file)
+    # np.savez(x_y_pcm_data_output_file, **{"X": X, "y": y})
 
     # get_pcm_data(pcm_data_file)
 
