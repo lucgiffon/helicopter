@@ -173,6 +173,117 @@ def encode_data(data_file, mapping_code_one_hot, families=None):
         df_data_family = df_data[df_data[0].str.startswith(family)]
     df_data_family.apply(lambda row: mapping_code_one_hot(row[0]))
 
+def get_pcm_data(pcm_data_file):
+
+    names = ["identifier",
+    "NUM",
+    "ZP",
+    "OAT",
+    "SIGMA",
+    "IAS",
+    "TAS",
+    "ALPHAI",
+    "BETAI",
+    "TETA",
+    "PHI",
+    "HDG",
+    "P",
+    "Q",
+    "R",
+    "NZ",
+    "DDG",
+    "DDL",
+    "DDM",
+    "DDN",
+    "NR",
+    "TQ1",
+    "TQ2",
+    "TQTOT",
+    "PTOT",
+    "PMR",
+    "PTR",
+    "NP1",
+    "NP2",
+    "VX",
+    "VY",
+    "VZ",
+    "ZRS",
+    "MASSI",
+    "MRED",
+    "NMSIGMA",
+    "DMSC_F",
+    "DMSC_L",
+    "DMSC_R",
+    "DN",
+    "Czm",
+    "Mu",
+    "MACH",
+    "Mx",
+    "My",
+    "ZSIG",
+    "TSE1SU1",
+    "TSE1SU2",
+    "TSE1FI1",
+    "TSE1FI2",
+    "TSE2SU1",
+    "TSE2SU2",
+    "TSE2FI1",
+    "TSE2FI2",
+    "TSSUSCRFRONT",
+    "TSSUSCRREAR",
+    "TATRHUB",
+    "flight number",
+    "time start",
+    "time end",
+    "code",
+    "description"]
+
+    df_data = pd.read_csv(pcm_data_file, delimiter=",", header=None, names=names)
+    df_data = df_data[3:].reset_index(drop=True)
+    del df_data['identifier']
+    del df_data["NUM"]
+    del df_data["flight number"]
+    del df_data["time start"]
+    del df_data["time end"]
+    del df_data["description"]
+
+    encoding_manoeuvers = df_data.values[:, :-1].astype(np.float)
+    codes_manoeuvers = df_data.values[:, -1]
+
+    return codes_manoeuvers, encoding_manoeuvers
+
+def get_X_y_data_pcm(pcm_data_file, loads_data_file, return_codes=False):
+    codes, pcm_data = get_pcm_data(pcm_data_file)
+    df_data = pd.read_csv(loads_data_file, delimiter=";", header=None)
+
+    # there is a data point in the pcm data that is absent from the load data
+    # this loops find it and remove it
+    while True:
+        for idx_code, code in enumerate(codes):
+            if code != df_data.iloc[idx_code][0]:
+                codes = np.delete(codes, idx_code)
+                pcm_data = np.delete(pcm_data, idx_code, axis=0)
+                print("Mismatch manoeuver: {} {} {}".format(idx_code, code, df_data.iloc[idx_code][0]))
+                break
+        else:
+            break
+        continue
+
+    load_data = df_data.values[:, 1]
+
+    # remove lines from pcm data with infinite values in some columns
+    indexes_infty = np.argwhere(np.isinf(pcm_data))
+    line_infty = np.unique(indexes_infty[:, 0])
+    pcm_data = np.delete(pcm_data, line_infty, axis=0)
+    codes = np.delete(codes, line_infty, axis=0)
+    load_data = np.delete(load_data, line_infty, axis=0).astype(np.float)
+
+    if return_codes:
+        return codes, pcm_data, load_data
+    else:
+        return pcm_data, load_data
+
+
 @click.command()
 @click.argument('input_filepath', type=click.Path(exists=True))
 @click.argument('output_filepath', type=click.Path())
@@ -197,9 +308,16 @@ if __name__ == '__main__':
     manoeuvers_code_file = Path(os.environ["project_dir"]) / "data/raw/manoeuver_code.csv"
     mca_code_file = Path(os.environ["project_dir"]) / "data/raw/MCA_code.csv"
     data_main_rotor = Path(os.environ["project_dir"]) / "data/raw/Data_Main_rotor.csv"
+    pcm_data_file = Path(os.environ["project_dir"]) / "data/raw/PCM.csv"
 
     families = ("L")
 
-    mapping_code_one_hot = create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=families)
-    encode_data(data_main_rotor, mapping_code_one_hot, families=families)
-    print(mapping_code_one_hot("LLAXXGIB"))
+    # mapping_code_one_hot = create_mapping_code_one_hot(manoeuvers_code_file, mca_code_file, families=families)
+    # encode_data(data_main_rotor, mapping_code_one_hot, families=families)
+    x_y_pcm_data_output_file = Path(os.environ["project_dir"]) / "data/external/pcm_main_rotor.npz"
+    X, y = get_X_y_data_pcm(pcm_data_file, data_main_rotor)
+    np.savez(x_y_pcm_data_output_file, **{"X": X, "y": y})
+
+    # get_pcm_data(pcm_data_file)
+
+    # print(mapping_code_one_hot("LLAXXGIB"))
