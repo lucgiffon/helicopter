@@ -72,7 +72,7 @@ def create_siamese_embedder(X, y, X_val, y_val, batch_size=128, nb_epochs=10):
 
     tb_cb = TensorBoard(log_dir='./logs_siamese/{}'.format(time.time()),
                         histogram_freq=0, batch_size=32, write_graph=True, write_grads=True, write_images=False, embeddings_freq=0, embeddings_layer_names=None, embeddings_metadata=None,
-                        embeddings_data=None, update_freq='epoch')
+                        embeddings_data=None, update_freq='batch')
 
     # train
     adam = Adam(1e-1)
@@ -85,7 +85,7 @@ def create_siamese_embedder(X, y, X_val, y_val, batch_size=128, nb_epochs=10):
 
 
     transformation_model = Model(input=[input_a], output=[processed_a])
-    transformation_model.compile(optimizer=adam)
+    transformation_model.compile(optimizer=adam, loss="mse")
     return transformation_model
 
 def main():
@@ -110,4 +110,4 @@ def main():
 
 
 if __name__ == "__main__":
-    pass
+    main()

@@ -87,14 +87,18 @@ def main():
 
     y_mu_test, y_std_test = make_mdn_prediction(model, X_test, scaling=max_y_train)
     y_true = y_test
-    n_to_show = 100
-    plt.scatter(np.arange(y_true.shape[0])[:n_to_show], np.squeeze(y_true)[:n_to_show], label="True")
-    plt.errorbar(np.arange(y_true.shape[0])[:n_to_show], np.squeeze(y_mu_test)[:n_to_show], fmt='go', marker="o", ecolor="g", yerr=np.squeeze(y_std_test)[:n_to_show], label="Predicted")
+    n_to_show = 50
+    plt.scatter(np.arange(y_true.shape[0])[:n_to_show], np.squeeze(y_true)[:n_to_show], label="Actual observation")
+    plt.errorbar(np.arange(y_true.shape[0])[:n_to_show], np.squeeze(y_mu_test)[:n_to_show], fmt='go', marker="o", ecolor="g", yerr=np.squeeze(y_std_test)[:n_to_show], label="Predicted mean and std")
     plt.legend()
+    plt.title("Prediction using PCM data")
+    plt.xlabel("Manoeuvers (arbitrary indexing)")
+    plt.ylabel("Load")
     plt.show()
     print(np.mean(np.square(y_true - y_mu_test)))
     print(np.linalg.norm(y_true - y_mu_test) / np.linalg.norm(y_true))
     print(np.max(y_true), np.max(y_mu_test), np.max(np.abs(y_true - y_mu_test)))
+    print(np.mean(y_std_test))
 
 
 if __name__ == "__main__":
