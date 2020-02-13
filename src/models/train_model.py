@@ -22,6 +22,8 @@ np.random.seed(42)
 def build_base_network(input_shape):
     inputs = Input(shape=input_shape)
     hidden = BatchNormalization()(inputs)
+    # oups, forgot activation here... should have been:
+    # Dense(16, activation='relu')
     hidden = Dense(16)(hidden)
     hidden = BatchNormalization()(hidden)
     model = Model(inputs=inputs, outputs=hidden)
